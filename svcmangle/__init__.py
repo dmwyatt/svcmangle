@@ -448,14 +448,27 @@ class ServiceControlManager:
 
 
 @contextmanager
-def stop_and_disable(service_name: str) -> None:
+def stop_and_disable(service_name: str, disregard_already_stopped: bool = True) -> None:
     service = ServiceControlManager(service_name)
     previous_state = service.status.state.value
-    service.status.state.stop()
-    pervious_start_type = service.config.start_type.value
+
+    try:
+        service.status.state.stop()
+    except pywintypes.error as e:
+        if (
+            e.winerror == winerror.ERROR_SERVICE_NOT_ACTIVE
+            and disregard_already_stopped
+        ):
+            pass
+        else:
+            raise
+
+    previous_start_type = service.config.start_type.value
     service.config.start_type.set_disabled()
-    yield
-    service.config.start_type.set_start_type(pervious_start_type)
+
+    yield service
+
+    service.config.start_type.set_start_type(previous_start_type)
     if previous_state in (
         win32service.SERVICE_RUNNING,
         win32service.SERVICE_START_PENDING,
