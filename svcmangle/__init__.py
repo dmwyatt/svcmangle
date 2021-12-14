@@ -171,21 +171,21 @@ class ServiceStartType:
         return self.value_to_ms_name.get(self.value, "UNKNOWN")
 
     def set_auto_start(self, wait_for_seconds: int = 10):
-        self._set_start_type(win32service.SERVICE_AUTO_START, wait_for_seconds)
+        self.set_start_type(win32service.SERVICE_AUTO_START, wait_for_seconds)
 
     def set_boot_start(self, wait_for_seconds: int = 10):
-        self._set_start_type(win32service.SERVICE_BOOT_START, wait_for_seconds)
+        self.set_start_type(win32service.SERVICE_BOOT_START, wait_for_seconds)
 
     def set_demand_start(self, wait_for_seconds: int = 10):
-        self._set_start_type(win32service.SERVICE_DEMAND_START, wait_for_seconds)
+        self.set_start_type(win32service.SERVICE_DEMAND_START, wait_for_seconds)
 
     def set_disabled(self, wait_for_seconds: int = 10):
-        self._set_start_type(win32service.SERVICE_DISABLED, wait_for_seconds)
+        self.set_start_type(win32service.SERVICE_DISABLED, wait_for_seconds)
 
     def set_system_start(self, wait_for_seconds: int = 10):
-        self._set_start_type(win32service.SERVICE_SYSTEM_START, wait_for_seconds)
+        self.set_start_type(win32service.SERVICE_SYSTEM_START, wait_for_seconds)
 
-    def _set_start_type(
+    def set_start_type(
         self, start_type: Literal[2, 0, 3, 4, 1], wait_for_seconds: int = 10
     ):
         win32serviceutil.ChangeServiceConfig(
@@ -412,10 +412,8 @@ class ServiceControlManager:
             (win32service.SC_MANAGER_CONNECT, win32service.SERVICE_CHANGE_CONFIG),
             (win32con.GENERIC_READ, win32service.SERVICE_ALL_ACCESS),
         )
-        # permission_combos = []
         hs = None
         svc_ctrl_manager = None
-        err = None
 
         try:
             for idx, values in enumerate(permission_combos):
@@ -447,6 +445,23 @@ class ServiceControlManager:
             if svc_ctrl_manager:
                 logging.debug("closing service manager")
                 win32service.CloseServiceHandle(svc_ctrl_manager)
+
+
+@contextmanager
+def stop_and_disable(service_name: str) -> None:
+    service = ServiceControlManager(service_name)
+    previous_state = service.status.state.value
+    service.status.state.stop()
+    pervious_start_type = service.config.start_type.value
+    service.config.start_type.set_disabled()
+    yield
+    service.config.start_type.set_start_type(pervious_start_type)
+    if previous_state in (
+        win32service.SERVICE_RUNNING,
+        win32service.SERVICE_START_PENDING,
+        win32service.SERVICE_CONTINUE_PENDING,
+    ):
+        service.status.state.start()
 
 
 def is_admin():
