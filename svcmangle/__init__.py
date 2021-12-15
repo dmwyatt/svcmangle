@@ -448,33 +448,40 @@ class ServiceControlManager:
 
 
 @contextmanager
-def stop_and_disable(service_name: str, disregard_already_stopped: bool = True) -> None:
+def stopped_service(
+    service_name: str,
+    ignore_stopped: bool = True,
+    wait_for: int = 10,
+    also_disable: bool = True,
+) -> None:
     service = ServiceControlManager(service_name)
     previous_state = service.status.state.value
 
     try:
-        service.status.state.stop()
+        service.status.state.stop(wait_for_seconds=wait_for)
     except pywintypes.error as e:
-        if (
-            e.winerror == winerror.ERROR_SERVICE_NOT_ACTIVE
-            and disregard_already_stopped
-        ):
+        if e.winerror == winerror.ERROR_SERVICE_NOT_ACTIVE and ignore_stopped:
             pass
         else:
             raise
 
     previous_start_type = service.config.start_type.value
-    service.config.start_type.set_disabled()
+
+    if also_disable:
+        service.config.start_type.set_disabled(wait_for_seconds=wait_for)
 
     yield service
 
-    service.config.start_type.set_start_type(previous_start_type)
+    if also_disable:
+        service.config.start_type.set_start_type(
+            previous_start_type, wait_for_seconds=wait_for
+        )
     if previous_state in (
         win32service.SERVICE_RUNNING,
         win32service.SERVICE_START_PENDING,
         win32service.SERVICE_CONTINUE_PENDING,
     ):
-        service.status.state.start()
+        service.status.state.start(wait_for_seconds=wait_for)
 
 
 def is_admin():
@@ -555,38 +562,6 @@ def stop_service(service_name: str) -> None:
     :return: None
     """
     win32serviceutil.StopService(service_name)
-
-
-def disable_service(service_name: str) -> None:
-    """
-    Disables a service.
-
-    :param service_name: Name of the service to disable.
-    :return: None
-    """
-    win32serviceutil.ChangeServiceConfig(
-        None,
-        service_name,
-        startType=win32service.SERVICE_DISABLED,
-    )
-    logging.debug("waiting for service to be disabled")
-    wait_for_service_config_status(service_name, win32service.SERVICE_DISABLED, 10)
-
-
-def enable_service(service_name: str) -> None:
-    """
-    Enables a service.
-
-    :param service_name: Name of the service to enable.
-    :return: None
-    """
-    win32serviceutil.ChangeServiceConfig(
-        None,
-        service_name,
-        startType=win32service.SERVICE_AUTO_START,
-    )
-    start = time.time()
-    wait_for_service_config_status(service_name, win32service.SERVICE_AUTO_START, 10)
 
 
 def wait_for_service_config_status(
