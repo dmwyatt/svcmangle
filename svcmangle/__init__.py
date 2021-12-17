@@ -407,6 +407,7 @@ class ServiceControlManager:
 
     @contextmanager
     def get_handle(self):
+        # some various combinations of permissions that I've found work to get a handle
         permission_combos = (
             (win32service.SC_MANAGER_ALL_ACCESS, win32service.SERVICE_ALL_ACCESS),
             (win32service.SC_MANAGER_CONNECT, win32service.SERVICE_CHANGE_CONFIG),
@@ -418,7 +419,9 @@ class ServiceControlManager:
         try:
             for idx, values in enumerate(permission_combos):
                 sc_perm, svc_perm = values
-                logging.debug("getting service handle")
+                logging.debug(
+                    "attempting to get service handle for %s", self.service_name
+                )
                 svc_ctrl_manager = win32service.OpenSCManager(None, None, sc_perm)
                 logging.debug("opening service")
 
@@ -427,7 +430,6 @@ class ServiceControlManager:
                         svc_ctrl_manager, self.service_name, svc_perm
                     )
 
-                    logging.debug("yielding service handle")
                 except pywintypes.error as e:
                     if idx == len(permission_combos) - 1:
                         raise
@@ -436,6 +438,8 @@ class ServiceControlManager:
                         continue
 
                 if hs:
+                    logging.debug("got service handle for %s", self.service_name)
+
                     yield hs
                     break
         finally:
@@ -454,28 +458,46 @@ def stopped_service(
     wait_for: int = 10,
     also_disable: bool = True,
 ) -> None:
+    """
+    Context manager to stop a service and then start it again.
+
+    :param service_name: The name of the service to stop and start
+    :param ignore_stopped: If True, don't raise if the service is already stopped. Default: True.
+    :param wait_for: How long to wait for each of these actions: stop, disable, enable,
+        start. Defaults to 10 seconds.
+    :param also_disable: If True, disable the service after stopping it. Default: True.
+    """
     service = ServiceControlManager(service_name)
+
+    # stop the service
     previous_state = service.status.state.value
 
     try:
         service.status.state.stop(wait_for_seconds=wait_for)
     except pywintypes.error as e:
         if e.winerror == winerror.ERROR_SERVICE_NOT_ACTIVE and ignore_stopped:
+            # service is already stopped and we don't care
             pass
         else:
+            # service is already stopped or some other error
             raise
 
+    # disable the service
     previous_start_type = service.config.start_type.value
 
     if also_disable:
         service.config.start_type.set_disabled(wait_for_seconds=wait_for)
 
+    # yield the service
     yield service
 
+    # enable the service
     if also_disable:
         service.config.start_type.set_start_type(
             previous_start_type, wait_for_seconds=wait_for
         )
+
+    # start the service
     if previous_state in (
         win32service.SERVICE_RUNNING,
         win32service.SERVICE_START_PENDING,
